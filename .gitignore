@@ -6,7 +6,7 @@ dist/
 build/
 
 # Environment variables
-.env
+.env.keys
 
 # Logs
 npm-debug.log*
@@ -24,5 +24,4 @@ Thumbs.db
 .vscode/
 
 # Other
-index.html
 test*
