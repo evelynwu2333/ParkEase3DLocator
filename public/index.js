@@ -8,10 +8,10 @@ let directionsRenderer;
 let directionsService;
 let routeCoordinates;
 let addedMarker = null;
-
+let markerClickListener;
 
 // The location of Canberra
-const position = { lat: -35.2809, lng: 149.1300 };
+const startPosition = { lat: -35.2809, lng: 149.1300 };
 const ACT_BOUNDS = {
   north: -35.1241,
   south: -35.9213,
@@ -19,14 +19,15 @@ const ACT_BOUNDS = {
   east: 149.3997
 };
 
-// Fetch the API key from the backend
-async function loadGoogleMaps() {
+// main
+async function loadMaps() {
+  // Fetch the API key from the backend
   try {
       const response = await fetch('/api-key');
       const data = await response.json();
       const apiKey = data.apiKey;
 
-      // Dynamically load Google Maps API
+      // Load Google Maps API
       const script = document.createElement('script');
       script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&v=alpha&callback=initMap&loading=async`;
       script.async = true;
@@ -35,12 +36,12 @@ async function loadGoogleMaps() {
 
       window.initMap = async ()=> {
   
-        // The map, centered at Canberra
+        // Set up Canberra map
         const { Map } = await google.maps.importLibrary("maps")
       
         map = new google.maps.Map(document.getElementById("map"), {
           zoom: 10,
-          center: position,
+          center: startPosition,
           restriction: {
             latLngBounds: ACT_BOUNDS,
             strictBounds: false,
@@ -48,49 +49,33 @@ async function loadGoogleMaps() {
           mapId: "basemap",
         });
       
-        // search places for direction and display routes
+        // direction service and renderer
         directionsService = new google.maps.DirectionsService();
         directionsRenderer = new google.maps.DirectionsRenderer();
         directionsRenderer.setMap(map);
         directionsRenderer.setPanel(
           document.getElementById("sidebar")
         );
-        // search place and locate on map
+
+        // search place and route update
         initAutocomplete()
-      
-        
-      
+
       }
   } catch (error) {
       console.error('Error fetching API key:', error);
   }
 }
 
-
-
-
-// Helper function to create an info window.
-function updateInfoWindow(content, center) {
-  infoWindow.setContent(content);
-  infoWindow.setPosition(center);
-  infoWindow.open({
-    map,
-    anchor: marker,
-    shouldFocus: true,
-  });  
-}
-
 // Function to initialise simple place search - not optimized for real-world search
 async function initAutocomplete() {
 
-  const { AdvancedMarkerElement }  = await Promise.all([
+  const { AdvancedMarkerElement, PinElement }  = await Promise.all([
     google.maps.importLibrary("marker"),
     google.maps.importLibrary("places"),
   ]);
 
   const placeAutocomplete = new google.maps.places.PlaceAutocompleteElement({
     locationRestriction: ACT_BOUNDS,
-    // types: ['parking', 'park_and_ride']
   });
 
   placeAutocomplete.id = "place-autocomplete-input";
@@ -102,52 +87,92 @@ async function initAutocomplete() {
   
   // Create the marker and infowindow
   let collisionBehavior = google.maps.CollisionBehavior.REQUIRED_AND_HIDES_OPTIONAL;
-
+  const pinElement = new google.maps.marker.PinElement({
+    background: "#AB4AEF",
+    borderColor: "#E9E8F1",
+  });
   marker = new google.maps.marker.AdvancedMarkerElement({
     map,
     gmpClickable: true,
     collisionBehavior: collisionBehavior,
+    content: pinElement.element, 
     zIndex: 2,
   });
   infoWindow = new google.maps.InfoWindow({});
 
   // Add the gmp-placeselect listener, and display the results on the map.
   placeAutocomplete.addEventListener("gmp-placeselect", async ({ place }) => {
-    await place.fetchFields({
-      // fields: ["displayName", "formattedAddress", "location"],
-      fields: ['location']
-    });
-    // If the place has a geometry, then present it on a map.
-    if (place.viewport) {
-      map.fitBounds(place.viewport);
-    } else {
-      map.setCenter(place.location);
-      map.setZoom(17);
-    }
+    // Step 1: Select place and adjust map view
+    await selectPlace(place);
 
-    // let content =
-    //   '<div id="infowindow-content">' +
-    //   '<span id="place-displayname" class="title">' +
-    //   place.displayName +
-    //   "</span><br />" +
-    //   '<span id="place-address">' +
-    //   place.formattedAddress +
-    //   "</span>" +
-    //   "</div>";
+    // Step 2: Display marker and calculate route
+    displayMarkerAndRoute(place);
 
-    // updateInfoWindow(content, place.location);
-    // Calculate route to car park
-    calcRoute(position, place.location);
-
-    marker.position = place.location;
-    marker.addListener("gmp-click", () => {
-      console.log("Show 3D map...");
-      show3dMap(routeCoordinates, marker.position);
-      
-    });
+    // Step 3: Add event listener to marker for 3D map
+    addMarkerClickListener(marker);
   });
-  
-  
+}
+
+// Select Place and Update Map View
+async function selectPlace(place) {
+  await place.fetchFields({
+    fields: ["displayName", "formattedAddress", "location"],
+  });
+
+  // If the place has a geometry, adjust the map view
+  if (place.viewport) {
+    map.fitBounds(place.viewport);
+  } else {
+    map.setCenter(place.location);
+    map.setZoom(17);
+  }
+}
+
+// Display Marker and Calculate Route
+function displayMarkerAndRoute(place) {
+  const content =
+    '<div id="infowindow-content">' +
+    '<span id="place-displayname" class="title">' +
+    place.displayName +
+    "</span><br />" +
+    '<span id="place-address">' +
+    place.formattedAddress +
+    "</span>" +
+    "</div>";
+
+  updateInfoWindow(content, place.location); // Update the info window
+  calcRoute(startPosition, place.location); // Calculate route from start position to selected location
+
+  // Update marker position
+  marker.position = place.location;
+} 
+
+// Add Marker Event Listener
+function addMarkerClickListener(marker) {
+  if (markerClickListener) {
+    google.maps.event.removeListener(markerClickListener);
+  }
+
+  markerClickListener = marker.addListener(
+    "gmp-click",
+    async () => {
+      console.log("Show 3D map...");
+      await show3dMap(routeCoordinates, marker.position);
+    },
+    { once: true } // Add the listener only once
+  );
+}
+
+
+// Helper function to create an info window.
+function updateInfoWindow(content, center) {
+  infoWindow.setContent(content);
+  infoWindow.setPosition(center);
+  infoWindow.open({
+    map,
+    anchor: marker,
+    shouldFocus: false,
+  });  
 }
 
 // Function to calculate route
@@ -158,7 +183,6 @@ async function calcRoute(start, end) {
     travelMode: 'DRIVING',
     region: 'au',
   };
-
 
   directionsService.route(request, async function(result, status) {
     if (status == 'OK') {
@@ -177,20 +201,15 @@ async function calcRoute(start, end) {
 }
 
 
-// Function to show 3D map and camera fly around marker
+// Function to show 3D map and user add new entrance on 3D map
 async function show3dMap(routeCoordinates, markerPosition) {
+  
   // Dynamically create the 3D map container
   const map3dDiv = document.getElementById("map3d");
   map3dDiv.style.display = "block";
 
   // Initialize the 3D map
-  const { Map3DElement, Polyline3DElement, AltitudeMode, Marker3DElement } = await google.maps.importLibrary("maps3d");
-
-  // get coordinates of the last segment of the route
-  const lastSegment = [
-    routeCoordinates[routeCoordinates.length - 2],
-    routeCoordinates[routeCoordinates.length - 1],
-  ];
+  const { AdvancedMarkerElement, Map3DElement, Polyline3DElement, AltitudeMode, Marker3DElement } = await google.maps.importLibrary("maps3d");
 
   // Initial camera setting
   const initialCamera = {
@@ -255,21 +274,34 @@ async function show3dMap(routeCoordinates, markerPosition) {
   }
 
   // Stop camera animation
-  map3d.addEventListener("gmp-click", stopCamera)
-
-  // Add a click listener for marker to show 3d map
+  map3d.addEventListener("gmp-click", () => {
+    stopCamera();
+  }, { once: true });
+  
+  // show close button and add marker button
   const addMarkerButton = document.getElementById("addMarker");
   const closeButton = document.getElementById("close3d");
   const floatButtons = document.getElementById("floatButtons");
   floatButtons.style.display = "flex";
 
-  addMarkerButton.addEventListener("click", addRemovableMarker);
-  closeButton.addEventListener('click', close3dMap);
+  // user to click "Add new entrance" button then click on map to add a new marker
+  let mks;
+  addMarkerButton.removeEventListener('click', addRemovableMarker);
+  addMarkerButton.addEventListener("click", async () => {
+    mks = await addRemovableMarker();
+  }, { once: true });
+  // console.log(mks);
+
+  // close the 3D map to update the route to the new entrance
+  closeButton.addEventListener('click', async () => {
+    await close3dMap(mks);
+    mks = [];
+  }, { once: true });
 }
 
 // Function to stop camera animation
 async function stopCamera() {
-  map3d.stopCameraAnimation();
+  await map3d.stopCameraAnimation();
   console.log("Stopping camera...");
 }
 
@@ -277,29 +309,41 @@ async function stopCamera() {
 async function addRemovableMarker() {
   console.log("Add a new entrance...");
   let markers = [];
-  // remove stop camera event listener
+  // remove stop camera event listener from 3D map
   map3d.removeEventListener('gmp-click', stopCamera);
-  console.log("Stop camera event listner removed");
 
+  // add marker event listener to 3D map
+  map3d.removeEventListener('gmp-click', clickMap);
+  map3d.addEventListener('gmp-click', async (e) => {
+    await clickMap(e, markers); 
+    // get the new entrance position
+    console.log(`New marker added: ${addedMarker.position.lat}, ${addedMarker.position.lng}`);
+  });
+  return markers;
+
+}
+
+// Function to manage 3D marker addition and remove
+async function clickMap(e, markers) {
   const { Marker3DInteractiveElement } = await google.maps.importLibrary("maps3d");
-  map3d.addEventListener('gmp-click', (e) => {
-    if (markers.length > 0) {
-      console.log(markers);
-      const interactiveMarker = document.querySelector('gmp-marker-3d-interactive');
-      console.log(interactiveMarker);
-      interactiveMarker.remove();
-      markers = [];
-      addedMarker = new Marker3DInteractiveElement({
-        position: {lat: e.position.lat, lng: e.position.lng, altitude: 100},
-        label: "New entrance",
-        zIndex: 10,
-      })
-      map3d.append(addedMarker);
-      markers.push(addedMarker);
-      console.log(markers);
-      return;
-    }
-    console.log({lat: e.position.lat, lng: e.position.lng, altitude: 100});
+  // console.log(markers.length);
+  if (markers.length > 0) {
+    // remove old marker and add new marker at clicked position
+    const interactiveMarker = document.querySelector('gmp-marker-3d-interactive');
+    interactiveMarker.remove();
+    addedMarker = new Marker3DInteractiveElement({
+      position: {lat: e.position.lat, lng: e.position.lng, altitude: 100},
+      label: "New entrance",
+      zIndex: 10,
+    })
+    map3d.append(addedMarker);
+    markers = [];
+    // console.log("removed marker: ", markers);
+    console.log(markers.length);
+    markers.push(addedMarker);
+    // console.log("added new marker: ", markers);
+  } else {
+    // add new marker
     addedMarker = new Marker3DInteractiveElement({
       position: {lat: e.position.lat, lng: e.position.lng, altitude: 100},
       label: "New entrance",
@@ -307,18 +351,47 @@ async function addRemovableMarker() {
     })
     map3d.append(addedMarker);
     markers.push(addedMarker);
-    console.log(markers);
-  });
-  
+    // console.log("new marker added: ", markers);
+  }
 }
 
-// Function to close 3D map
-async function close3dMap() {
+// Actions after close 3D map
+async function close3dMap(mks) {
+  // remove 3D map and buttons
   const map3dDiv = document.getElementById("map3d");
+  map3dDiv.innerHTML = null;
   map3dDiv.style.display = "none";
   const floatButtons = document.getElementById("floatButtons");
   floatButtons.style.display = "none";
+  // console.log(mks);
+  if (!mks) { 
+    console.log('No markers added');
+    return; 
+  } else if (mks.length > 0) {
+    // update marker and recalculate route
+    updateRoute();
+  }
 }
 
-loadGoogleMaps();
+// Function to update route and marker after close 3D map
+async function updateRoute() {
+  const { AdvancedMarkerElement }  = await Promise.all([
+    google.maps.importLibrary("marker"),
+    google.maps.importLibrary("places"),
+  ]);
 
+  marker.remove();
+  // console.log(addedMarker);
+  marker = new google.maps.marker.AdvancedMarkerElement({
+    map,
+    position: {lat: addedMarker.position.lat, lng: addedMarker.position.lng},
+    gmpClickable: true,
+    title: 'New entrance',
+    zIndex: 2,
+  });
+  // Recalculate route with new entrace position
+  calcRoute(startPosition, {lat: addedMarker.position.lat, lng: addedMarker.position.lng});
+  console.log("Route is updated");
+}
+
+loadMaps();
