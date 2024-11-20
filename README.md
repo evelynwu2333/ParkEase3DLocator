@@ -86,7 +86,7 @@ ParkEase3DLocator/
    The map displays a driving route from the default starting location to your selected destination. Please note that this app uses the coordinates of Canberra centre as a dummy start location for routing. 
 
 4. **Switch to 3D View**:
-   Interact with a 3D visualization of the route and the destination (e.g. a car park).
+   Click the marker to access the Photorealistic 3D Map. Interact with a 3D visualization of the route and the destination (e.g. a car park). Click anywhere on the 3D map to stop the camera animation if feeling motion-sick. 
 
 5. **Add New Entrance**:
    Click "Add New Entrance" to initialize the process, then click on the map to propose a new car park entrance. Close the 3D map once happy with the new location.
